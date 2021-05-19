@@ -11,23 +11,14 @@
 
   This one is written in simple arduino code without any semaphores, tasks, priorities, RTOS stuff ....
 
-  Just set a few parameters, compile and download, and it will record on power-on, until sd is full, or power-off.
+  Just set 4 parameters, compile and download, and it will record on power-on, until sd is full, or power-off.
   Then pull out the sd and move it to your computer, and you will see all but the last file avi which died during the unplug.
 
   Compile Time Parameters
-  1.  framesize 10,9,7,6,5 for 10 - UXGA (1600x1200 @ 6 fps),
-                                9 - SXGA (1280x1024 @ 6 fps),
-                                7 - SVGA(800x600 @ 24 fps),
-                                6 - VGA(640x480 @ 24 fps),
-                                5 - CIF(400x296 @ 50 fps)
-
+  1.  framesize 10,9,7,6,5 for 10 - UXGA (1600x1200 @ 6 fps), 9 - SXGA (1280x1024 @ 6 fps), 7 - SVGA(800x600 @ 24 fps), 6 - VGA(640x480 @ 24 fps), 5 - CIF(400x296 @ 50 fps)
   2.  quality - 1 to 63 - 10 is a good start, increase to 20 to get more frames per second - must be higher than jpeg_quality below
   3.  avi_length - seconds for each avi - it closes files, and starts another file after this time - like 60 or 1800
   4.  devname - a text name for your camera when the files are on your computer
-  5. If you want internet, set #define IncludeInternet to 1, and put in your ssid and password
-
-  If you hold down gpio 12 - the files will be closed, and recording stopped.  Web interface still running.
-  If you hold down gpio 13 during a movie start - it will record at UXGA 6 fps, rather than SVGA 25 fps.
 
   Note that framesize and high quality will produce lots of bytes which have to written to the sd.  Those frame rates above are
   for the OV2640 camera, and your sd card will have to be able to swallow all that data before the next frame.  If the
@@ -39,20 +30,19 @@
 
   The files will have the name such as:
 
-    desklens10.003.avi
+    desklens 10.3 + 120s.avi
 
     "desklens" is your devname
     10 - is a number stored in eprom that will increase everytime your device boots
     3 - is the 3rd file created during the current boot
+    +120s - is an indictation of how long since we started recording on this boot
+          - this is the 3rd file, and started 120 seconds after the boot, so the files must be 60 seconds long
 
   Small red led on the back blinks with every frame.
 
 
   by James Zahary Sep 12, 2020
      jamzah.plc@gmail.com
-
-  - v09 Sep 24, 2020
-  - v10 Sep 28, 2020
 
   https://github.com/jameszah/ESP32-CAM-Video-Recorder-junior
   https://github.com/jameszah/ESP32-CAM-Video-Recorder
@@ -83,37 +73,22 @@
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // user edits here:
 
-static const char vernum[] = "v10";
-static const char devname[] = "desklens";         // name of your camera for mDNS, Router, and filenames
+static const char vernum[] = "v07";
+static const char devname[] = "vase";         // name of your camera for mDNS, Router, and filenames
 
 #define IncludeInternet 0               // if you want internet/wifi, change the to 1, and put in your wifi name/pass             
-const char* ssid = "jzjzjz";
-const char* password = "jzjzjz";
+const char* ssid = "vase";
+const char* password = "12345678";
 
 // https://sites.google.com/a/usapiens.com/opnode/time-zones  -- find your timezone here
-#define TIMEZONE "GMT0BST,M3.5.0/01,M10.5.0/02"             // your timezone  -  this is GMT
+#define TIMEZONE "EET-2EEST-3,M3.5.0/03:00:00,M10.5.0/04:00:00"             // your timezone  -  this is GMT
 
-// two configurations
-// c1 is config if you have nothing on pin 13
-// c2 will be used if you ground pin 13, through a 10k resistor
-// c1 = svga, quality 10, 30 minutes
-// c2 = uxga, quality 10, 30 minutes
+// svga, quality 10, 5 minute video then restart, .. and realtime fast as the camera and disk will allow
+int  framesize = 7;                //  10 UXGA, 9 SXGA, 7 SVGA, 6 VGA, 5 CIF
+int  quality = 10;                 //  quality on the 1..63 scale  - lower is better quality and bigger files - must be higher than the jpeg_quality in camera_config
+int avi_length = 10;               // how long a movie in seconds -- 300 = 5 minutes
 
-int c1_framesize = 7;                //  10 UXGA, 9 SXGA, 7 SVGA, 6 VGA, 5 CIF
-int c1_quality = 10;                 //  quality on the 1..63 scale  - lower is better quality and bigger files - must be higher than the jpeg_quality in camera_config
-int c1_avi_length = 1800;            // how long a movie in seconds -- 1800 sec = 30 min
-
-int c2_framesize = 10;
-int c2_quality = 10;
-int c2_avi_length = 1800;
-
-int c1_or_c2 = 1;
-int framesize = c1_framesize;
-int quality = c1_quality;
-int avi_length = c1_avi_length;
-
-
-int MagicNumber = 12;                // change this number to reset the eprom in your esp32 for file numbers
+int MagicNumber = 11;                // change this number to reset the eprom in your esp32 for file numbers
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -124,7 +99,7 @@ int most_recent_avg_framesize = 0;
 uint8_t* framebuffer;
 int framebuffer_len;
 
-uint8_t framebuffer_static[64 * 1024 + 20];
+uint8_t framebuffer_static[33 * 1024];
 int framebuffer_len_static;
 
 //#define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
@@ -166,7 +141,7 @@ camera_fb_t * fb_next = NULL;
 static esp_err_t cam_err;
 
 int first = 1;
-//int frame_cnt = 0;
+int frames = 0;
 long frame_start = 0;
 long frame_end = 0;
 long frame_total = 0;
@@ -179,9 +154,6 @@ int done = 0;
 long avi_start_time = 0;
 long avi_end_time = 0;
 int stop = 0;
-int stop_2nd_opinion = -2;
-int stop_1st_opinion = -1;
-
 int we_are_already_stopped = 0;
 long total_delay = 0;
 long bytes_before_last_100_frames = 0;
@@ -277,7 +249,7 @@ const int avi_header[AVIOFFSET] PROGMEM = {
   0x01, 0x00, 0x18, 0x00, 0x4D, 0x4A, 0x50, 0x47, 0x00, 0x84, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00,
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x49, 0x4E, 0x46, 0x4F,
   0x10, 0x00, 0x00, 0x00, 0x6A, 0x61, 0x6D, 0x65, 0x73, 0x7A, 0x61, 0x68, 0x61, 0x72, 0x79, 0x20,
-  0x76, 0x31, 0x30, 0x20, 0x4C, 0x49, 0x53, 0x54, 0x00, 0x01, 0x0E, 0x00, 0x6D, 0x6F, 0x76, 0x69,
+  0x76, 0x30, 0x37, 0x20, 0x4C, 0x49, 0x53, 0x54, 0x00, 0x01, 0x0E, 0x00, 0x6D, 0x6F, 0x76, 0x69,
 };
 
 
@@ -390,33 +362,16 @@ static esp_err_t config_camera() {
   //Serial.printf("Before camera config ...");
   //Serial.printf("Internal Total heap %d, internal Free Heap %d\n\n", ESP.getHeapSize(), ESP.getFreeHeap());
 
-  esp_err_t cam_err = ESP_FAIL;
-  int attempt = 2;
-  while (attempt && cam_err != ESP_OK) {
-    cam_err = esp_camera_init(&config);
-    if (cam_err != ESP_OK) {
-      Serial.printf("Camera init failed with error 0x%x", cam_err);
-      digitalWrite(PWDN_GPIO_NUM, 1);
-      delay(100);
-      digitalWrite(PWDN_GPIO_NUM, 0); // power cycle the camera (OV2640)
-      attempt--;
-    }
-  }
-
+  // camera init
+  cam_err = esp_camera_init(&config);
   if (cam_err != ESP_OK) {
-    major_fail();
+    Serial.printf("Camera init failed with error 0x%x", cam_err);
   }
 
   //Serial.printf("After camera config ...");
   //Serial.printf("Internal Total heap %d, internal Free Heap %d\n\n", ESP.getHeapSize(), ESP.getFreeHeap());
 
   sensor_t * ss = esp_camera_sensor_get();
-
-  ///ss->set_vflip(ss, 1);          // 0 = disable , 1 = enable
-  ///ss->set_hmirror(ss, 0);        // 0 = disable , 1 = enable
-
-  Serial.printf("\nCamera started correctly, Type is %x (hex) of 9650, 7725, 2640, 3660, 5640\n\n", ss->id.PID);
-
   ss->set_quality(ss, quality);
   ss->set_framesize(ss, (framesize_t)framesize);
 
@@ -456,13 +411,12 @@ static esp_err_t init_sdcard()
   if (ret == ESP_OK) {
     Serial.println("SD card mount successfully!");
   }  else  {
-    Serial.printf("Failed to mount SD card VFAT filesystem. Error: %s\n\n", esp_err_to_name(ret));
-    Serial.println("Do you have an SD Card installed?");
-    Serial.println("Check pin 12 and 13, not grounded, or grounded with 10k resistors!\n");
+    Serial.printf("Failed to mount SD card VFAT filesystem. Error: %s", esp_err_to_name(ret));
     major_fail();
   }
 
   sdmmc_card_print_info(stdout, card);
+
 }
 
 
@@ -498,7 +452,7 @@ camera_fb_t *  get_good_jpeg() {
           if (j > 1000) { //  never happens. but > 1 does, usually 400-500
             Serial.print("Frame "); Serial.print(frame_cnt);
             Serial.print(", Len = "); Serial.print(x);
-            Serial.print(", Correct Len = "); Serial.print(x - j + 1);
+            Serial.print(", Corrent Len = "); Serial.print(x - j + 1);
             Serial.print(", Extra Bytes = "); Serial.println( j - 1);
           }
           foundffd9 = 1;
@@ -588,7 +542,7 @@ static esp_err_t start_avi() {
 
   Serial.println("Starting an avi ");
 
-  sprintf(fname, "/sdcard/%s%d.%03d.avi",  devname, file_group, file_number);
+  sprintf(fname, "/sdcard/%s %d.%d + %ds.avi",  devname, file_group, file_number, (millis() - boot_time) / 1000);
 
   file_number++;
 
@@ -689,7 +643,7 @@ static esp_err_t start_avi() {
   uVideoLen = 0;
   idx_offset = 4;
 
-  //frame_cnt = 0;
+  frame_cnt = 0;
 
   bad_jpg = 0;
   extend_jpg = 0;
@@ -724,9 +678,9 @@ static esp_err_t another_save_avi(camera_fb_t * fb ) {
   framebuffer_static[2] = 0x64;
   framebuffer_static[1] = 0x30;
   framebuffer_static[0] = 0x30;
-
+    
   int jpeg_size_rem = jpeg_size + remnant;
-
+  
   framebuffer_static[4] = jpeg_size_rem % 0x100;
   framebuffer_static[5] = (jpeg_size_rem >> 8) % 0x100;
   framebuffer_static[6] = (jpeg_size_rem >> 16) % 0x100;
@@ -734,9 +688,9 @@ static esp_err_t another_save_avi(camera_fb_t * fb ) {
 
   fb_block_start = fb->buf;
 
-  if (fblen > 64 * 1024 - 8 ) {
-    fb_block_length = 64 * 1024;
-    fblen = fblen - (64 * 1024 - 8);
+  if (fblen > 32 * 1024 - 8 ) {
+    fb_block_length = 32 * 1024;
+    fblen = fblen - (32 * 1024 - 8);
     memcpy(framebuffer_static + 8, fb_block_start, fb_block_length - 8);
     fb_block_start = fb_block_start + fb_block_length - 8;
 
@@ -754,8 +708,8 @@ static esp_err_t another_save_avi(camera_fb_t * fb ) {
 
   while (fblen > 0) {
 
-    if (fblen > 64 * 1024) {
-      fb_block_length = 64 * 1024;
+    if (fblen > 32 * 1024) {
+      fb_block_length = 32 * 1024;
       fblen = fblen - fb_block_length;
     } else {
       fb_block_length = fblen  + remnant;
@@ -798,102 +752,92 @@ static esp_err_t end_avi() {
 
   Serial.println("End of avi - closing the files");
 
+  elapsedms = millis() - startms;
 
-  if (frame_cnt <  10 ) {
-    Serial.println("Recording screwed up, less than 10 frames, forget index\n");
-    fclose(idxfile);
-    fclose(avifile);
-    int xx = remove("/sdcard/idx.tmp");
-    int yy = remove(fname);
-  } else {
+  float fRealFPS = (1000.0f * (float)frame_cnt) / ((float)elapsedms);
 
-    elapsedms = millis() - startms;
+  float fmicroseconds_per_frame = 1000000.0f / fRealFPS;
+  uint8_t iAttainedFPS = round(fRealFPS);
+  uint32_t us_per_frame = round(fmicroseconds_per_frame);
 
-    float fRealFPS = (1000.0f * (float)frame_cnt) / ((float)elapsedms);
+  //Modify the MJPEG header from the beginning of the file, overwriting various placeholders
 
-    float fmicroseconds_per_frame = 1000000.0f / fRealFPS;
-    uint8_t iAttainedFPS = round(fRealFPS);
-    uint32_t us_per_frame = round(fmicroseconds_per_frame);
+  fseek(avifile, 4 , SEEK_SET);
+  print_quartet(movi_size + 240 + 16 * frame_cnt + 8 * frame_cnt, avifile);
 
-    //Modify the MJPEG header from the beginning of the file, overwriting various placeholders
+  fseek(avifile, 0x20 , SEEK_SET);
+  print_quartet(us_per_frame, avifile);
 
-    fseek(avifile, 4 , SEEK_SET);
-    print_quartet(movi_size + 240 + 16 * frame_cnt + 8 * frame_cnt, avifile);
+  unsigned long max_bytes_per_sec = movi_size * iAttainedFPS / frame_cnt;
 
-    fseek(avifile, 0x20 , SEEK_SET);
-    print_quartet(us_per_frame, avifile);
+  fseek(avifile, 0x24 , SEEK_SET);
+  print_quartet(max_bytes_per_sec, avifile);
 
-    unsigned long max_bytes_per_sec = movi_size * iAttainedFPS / frame_cnt;
+  fseek(avifile, 0x30 , SEEK_SET);
+  print_quartet(frame_cnt, avifile);
 
-    fseek(avifile, 0x24 , SEEK_SET);
-    print_quartet(max_bytes_per_sec, avifile);
+  fseek(avifile, 0x8c , SEEK_SET);
+  print_quartet(frame_cnt, avifile);
 
-    fseek(avifile, 0x30 , SEEK_SET);
-    print_quartet(frame_cnt, avifile);
+  fseek(avifile, 0x84 , SEEK_SET);
+  print_quartet((int)iAttainedFPS, avifile);
 
-    fseek(avifile, 0x8c , SEEK_SET);
-    print_quartet(frame_cnt, avifile);
+  fseek(avifile, 0xe8 , SEEK_SET);
+  print_quartet(movi_size + frame_cnt * 8 + 4, avifile);
 
-    fseek(avifile, 0x84 , SEEK_SET);
-    print_quartet((int)iAttainedFPS, avifile);
-
-    fseek(avifile, 0xe8 , SEEK_SET);
-    print_quartet(movi_size + frame_cnt * 8 + 4, avifile);
-
-    Serial.println(F("\n*** Video recorded and saved ***\n"));
-    Serial.print(F("Recorded "));
-    Serial.print(elapsedms / 1000);
-    Serial.print(F("s in "));
-    Serial.print(frame_cnt);
-    Serial.print(F(" frames\nFile size is "));
-    Serial.print(movi_size + 12 * frame_cnt + 4);
-    Serial.print(F(" bytes\nActual FPS is "));
-    Serial.print(fRealFPS, 2);
-    Serial.print(F("\nMax data rate is "));
-    Serial.print(max_bytes_per_sec);
-    Serial.print(F(" byte/s\nFrame duration is "));  Serial.print(us_per_frame);  Serial.println(F(" us"));
-    Serial.print(F("Average frame length is "));  Serial.print(uVideoLen / frame_cnt);  Serial.println(F(" bytes"));
-    Serial.print("Average picture time (ms) "); Serial.println( 1.0 * totalp / frame_cnt);
-    Serial.print("Average write time (ms)   "); Serial.println( 1.0 * totalw / frame_cnt );
-    Serial.print("Normal jpg % ");  Serial.println( 100.0 * normal_jpg / frame_cnt, 1 );
-    Serial.print("Extend jpg % ");  Serial.println( 100.0 * extend_jpg / frame_cnt, 1 );
-    Serial.print("Bad    jpg % ");  Serial.println( 100.0 * bad_jpg / frame_cnt, 5 );
+  Serial.println(F("\n*** Video recorded and saved ***\n"));
+  Serial.print(F("Recorded "));
+  Serial.print(elapsedms / 1000);
+  Serial.print(F("s in "));
+  Serial.print(frame_cnt);
+  Serial.print(F(" frames\nFile size is "));
+  Serial.print(movi_size + 12 * frame_cnt + 4);
+  Serial.print(F(" bytes\nActual FPS is "));
+  Serial.print(fRealFPS, 2);
+  Serial.print(F("\nMax data rate is "));
+  Serial.print(max_bytes_per_sec);
+  Serial.print(F(" byte/s\nFrame duration is "));  Serial.print(us_per_frame);  Serial.println(F(" us"));
+  Serial.print(F("Average frame length is "));  Serial.print(uVideoLen / frame_cnt);  Serial.println(F(" bytes"));
+  Serial.print("Average picture time (ms) "); Serial.println( 1.0 * totalp / frame_cnt);
+  Serial.print("Average write time (ms)   "); Serial.println( totalw / frame_cnt );
+  Serial.print("Normal jpg % ");  Serial.println( 100.0 * normal_jpg / frame_cnt, 1 );
+  Serial.print("Extend jpg % ");  Serial.println( 100.0 * extend_jpg / frame_cnt, 1 );
+  Serial.print("Bad    jpg % ");  Serial.println( 100.0 * bad_jpg / frame_cnt, 5 );
 
 
-    Serial.printf("Writng the index, %d frames\n", frame_cnt);
-    fseek(avifile, current_end, SEEK_SET);
+  Serial.printf("Writng the index, %d frames\n", frame_cnt);
+  fseek(avifile, current_end, SEEK_SET);
 
-    fclose(idxfile);
+  fclose(idxfile);
 
-    size_t i1_err = fwrite(idx1_buf, 1, 4, avifile);
+  size_t i1_err = fwrite(idx1_buf, 1, 4, avifile);
 
-    print_quartet(frame_cnt * 16, avifile);
+  print_quartet(frame_cnt * 16, avifile);
 
-    idxfile = fopen("/sdcard/idx.tmp", "r");
+  idxfile = fopen("/sdcard/idx.tmp", "r");
 
-    if (idxfile != NULL)  {
-      Serial.printf("File open: %s\n", "/sdcard/idx.tmp");
-    }  else  {
-      Serial.println("Could not open index file");
-      major_fail();
-    }
-
-    char * AteBytes;
-    AteBytes = (char*) malloc (8);
-
-    for (int i = 0; i < frame_cnt; i++) {
-      size_t res = fread ( AteBytes, 1, 8, idxfile);
-      size_t i1_err = fwrite(dc_buf, 1, 4, avifile);
-      size_t i2_err = fwrite(zero_buf, 1, 4, avifile);
-      size_t i3_err = fwrite(AteBytes, 1, 8, avifile);
-    }
-
-    free(AteBytes);
-
-    fclose(idxfile);
-    fclose(avifile);
-    int xx = remove("/sdcard/idx.tmp");
+  if (idxfile != NULL)  {
+    Serial.printf("File open: %s\n", "/sdcard/idx.tmp");
+  }  else  {
+    Serial.println("Could not open index file");
+    major_fail();
   }
+
+  char * AteBytes;
+  AteBytes = (char*) malloc (8);
+
+  for (int i = 0; i < frame_cnt; i++) {
+    size_t res = fread ( AteBytes, 1, 8, idxfile);
+    size_t i1_err = fwrite(dc_buf, 1, 4, avifile);
+    size_t i2_err = fwrite(zero_buf, 1, 4, avifile);
+    size_t i3_err = fwrite(AteBytes, 1, 8, avifile);
+  }
+
+  free(AteBytes);
+  fclose(idxfile);
+  fclose(avifile);
+  int xx = remove("/sdcard/idx.tmp");
+
   Serial.println("---");
 
 }
@@ -1012,6 +956,7 @@ static esp_err_t index_handler(httpd_req_t *req) {
 
   const char the_message[] = "Status";
 
+
   time(&now);
   const char *strdate = ctime(&now);
 
@@ -1028,19 +973,14 @@ static esp_err_t index_handler(httpd_req_t *req) {
 </head>
 <body>
 <h1>%s<br>ESP32-CAM Video Recorder Junior %s <br><font color="red">%s</font></h1><br>
-
- Used / Total SD Space <font color="red"> %d MB / %d MB</font><br>
- Rssi %d<br>
-
- Filename: %s <br>
- Framesize %d, Quality %d <br>
- Avg framesize %d, fps %.1f <br>
+ Used / Total SD Space <font color="red"> %d MB / %d MB</font>, Rssi %d<br>
+ Filename %s <br>
+ Framesize %d, Quality %d, avg framesize %d, fps %.1f <br>
  Time left in current video %d seconds<br>
  <br>
  <h3><a href="http://%s/">http://%s/</a></h3>
  <h3><a href="http://%s/stream">Stream at 5 fps </a></h3>
- <h3><a href="http://%s/photos">Photos - 15 saveable photos @ every 2 seconds </a></h3>
-
+ <h3><a href="http://%s/photos">Photos - 15 saveable photos @ 1 fps </a></h3>
 </body>
 </html>)rawliteral";
 
@@ -1051,9 +991,9 @@ static esp_err_t index_handler(httpd_req_t *req) {
     time_left = 0;
   }
 
-
   sprintf(the_page, msg, devname, devname, vernum, strdate, use, tot, rssi, fname,
-          framesize, quality, most_recent_avg_framesize, most_recent_fps, time_left,
+          framesize, quality, most_recent_avg_framesize, most_recent_fps,
+          time_left,
           localip, localip, localip, localip);
 
 
@@ -1084,9 +1024,8 @@ static esp_err_t photos_handler(httpd_req_t *req) {
 <body>
 <h1>%s<br>ESP32-CAM Video Recorder Junior %s <br><font color="red">%s</font></h1><br>
  <br>
- One photo every 2 seconds for 30 seconds - roll forward or back - refresh for more live photos
+ One photo per second for 15 seconds - roll forward or back - refresh for more live photos
  <br>
-
 <br><div id="image-container"></div>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -1094,16 +1033,14 @@ document.addEventListener('DOMContentLoaded', function() {
   const ic = document.getElementById('image-container');  
   var i = 1;
   
-  var timing = 2000; // time between snapshots for multiple shots
-
+  var timing = 1000; // time between snapshots for multiple shots
   function loop() {
     ic.insertAdjacentHTML('beforeend','<img src="'+`${c}/capture?_cb=${Date.now()}`+'">')
     ic.insertAdjacentHTML('beforeend','<br>')
     ic.insertAdjacentHTML('beforeend',Date())
     ic.insertAdjacentHTML('beforeend','<br>')
-
     i = i + 1;
-    if ( i <= 15 ) {             // 1 frame every 2 seconds for 15 seconds 
+    if ( i <= 15 ) {             // 1 fps for 15 seconds 
       window.setTimeout(loop, timing);
     }
   }
@@ -1179,9 +1116,9 @@ static esp_err_t stream_handler(httpd_req_t *req) {
       return res;
     }
 
-    //if (fb_next == NULL) {
-    //  esp_camera_fb_return(fb);
-    //}
+    if (fb_next == NULL) {
+      esp_camera_fb_return(fb);
+    }
 
     delay(200);       // 200 ms = 5 fps !!!
   }
@@ -1243,7 +1180,6 @@ void setup() {
   digitalWrite(4, LOW);             // turn off
 
   pinMode(12, INPUT_PULLUP);        // pull this down to stop recording
-  pinMode(13, INPUT_PULLUP);        // pull this down switch to UXGA
 
   //Serial.setDebugOutput(true);
 
@@ -1257,6 +1193,7 @@ void setup() {
 
   //Serial.printf("Internal Total heap %d, internal Free Heap %d\n", ESP.getHeapSize(), ESP.getFreeHeap());
   //Serial.printf("SPIRam Total heap   %d, SPIRam Free Heap   %d\n", ESP.getPsramSize(), ESP.getFreePsram());
+
 
 
   if (IncludeInternet) {
@@ -1299,14 +1236,13 @@ void setup() {
     Serial.println("Start Web ...");
     startCameraServer();
   }
-
+  
   framebuffer = (uint8_t*)ps_malloc(512 * 1024); // buffer to store a jpg in motion
 
   Serial.println("  End of setup()\n\n");
 
   boot_time = millis();
 }
-
 
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1318,122 +1254,49 @@ void loop() {
     Serial.print("the loop, core ");  Serial.print(xPortGetCoreID());
     Serial.print(", priority = "); Serial.println(uxTaskPriorityGet(NULL));
     first = 0;
-    frame_cnt = 0;
-    stop_2nd_opinion = digitalRead(12);
-    stop_1st_opinion = digitalRead(12);
   }
 
-  frame_cnt = frame_cnt + 1;
+  frames++;
+  frame_cnt = frames;
 
-  stop_2nd_opinion = stop_1st_opinion;
-  stop_1st_opinion = digitalRead(12);
+  stop = digitalRead(12);
 
-  if (stop_1st_opinion == stop_2nd_opinion ) {
-    if (stop_1st_opinion > 0 ) stop = 1;
-    else stop = 0;
-  } else {
-    //Serial.println("Stop disagree");
-  }
+  if (frames == 1 ) {                              // start the avi
 
-  // if (frame_cnt == 1 && stop == 0)  // do nothing
-  // if (frame_cnt == 1 && stop == 1)  // start a movie
-  // if (frame_cnt > 1 && stop == 0)   // stop the movie
-  // if (frame_cnt > 1 && stop != 0)   // another frame
+    if (stop == 0) {
 
-  if (frame_cnt == 1 && stop == 0) {
+      if (we_are_already_stopped == 0) Serial.println("\n\nDisconnect Pin 12 from GND to start recording.\n\n");
+      frames--;
+      we_are_already_stopped = 1;
+      delay(100);
 
-    // Serial.println("Do nothing");
-    if (we_are_already_stopped == 0) Serial.println("\n\nDisconnect Pin 12 from GND to start recording.\n\n");
-    frame_cnt = frame_cnt - 1;
-    we_are_already_stopped = 1;
-    delay(100);
+    } else {
+      we_are_already_stopped = 0;
 
-  } else if (frame_cnt == 1 && stop == 1) {
+      avi_start_time = millis();
+      Serial.printf("Start the avi ... at %d\n", avi_start_time);
 
-    //Serial.println("Ready to start");
+      fb_curr = get_good_jpeg();                     // should take zero time
 
-    we_are_already_stopped = 0;
+      start_avi();
 
-    int read13 = digitalRead(13);
-    delay(20);
-    read13 = read13 + digitalRead(13);  // get 2 opinions to help poor soldering
+      fb_next = get_good_jpeg();                    // should take nearly zero time due to time spent writing header
 
+      another_save_avi( fb_curr);                  // put first frame in avi
 
-    if (read13 == 0 ) {
-      if ( c1_or_c2 == 1 ) {
-        c1_or_c2 = 2;
-        framesize = c2_framesize;
-        quality = c2_quality;
-        avi_length = c2_avi_length;
-        
-        Serial.println("Pin 13 is grounded, switching to config 2");
+      digitalWrite(33, frames % 2);                // blink
 
-        sensor_t * ss = esp_camera_sensor_get();
-        ss->set_quality(ss, quality);
-        ss->set_framesize(ss, (framesize_t) framesize);
+      esp_camera_fb_return(fb_curr);               // get rid of first frame
+      fb_curr = NULL;
 
-        ss->set_brightness(ss, 1);  //up the blightness just a bit
-        ss->set_saturation(ss, -2); //lower the saturation
-
-        delay(800);
-        for (int j = 0; j < 4; j++) {
-          camera_fb_t * fb = esp_camera_fb_get();
-          //Serial.print("Pic, len="); Serial.println(fb->len);
-          esp_camera_fb_return(fb);
-          delay(50);
-        }
-      }
-    } else {  // read13 = 1, so we want config 1
-      if ( c1_or_c2 == 2) {
-        c1_or_c2 = 1;
-        framesize = c1_framesize;
-        quality = c1_quality;
-        avi_length = c1_avi_length;
-        
-        Serial.println("Pin 13 not grounded, switching to config 1");
-
-        sensor_t * ss = esp_camera_sensor_get();
-        ss->set_quality(ss, quality);
-        ss->set_framesize(ss, (framesize_t)framesize);
-
-        ss->set_brightness(ss, 1);  //up the blightness just a bit
-        ss->set_saturation(ss, -2); //lower the saturation
-
-        delay(800);
-        for (int j = 0; j < 4; j++) {
-          camera_fb_t * fb = esp_camera_fb_get();
-          //Serial.print("Pic, len="); Serial.println(fb->len);
-          esp_camera_fb_return(fb);
-          delay(50);
-        }
-      }
     }
+  } else if ( stop == 0 ||  millis() > (avi_start_time + avi_length * 1000)) { // end the avi
 
-    avi_start_time = millis();
-    Serial.printf("Start the avi ... at %d\n", avi_start_time);
-    Serial.printf("Framesize %d, quality %d, length %d seconds\n\n", framesize, quality, avi_length);
-
-    fb_curr = get_good_jpeg();                     // should take zero time
-
-    start_avi();
-
-    fb_next = get_good_jpeg();                    // should take nearly zero time due to time spent writing header
-
-    another_save_avi( fb_curr);                  // put first frame in avi
-
-    digitalWrite(33, frame_cnt % 2);                // blink
-
-    esp_camera_fb_return(fb_curr);               // get rid of first frame
-    fb_curr = NULL;
-
-  } else if ( (frame_cnt > 1 && stop == 0) ||  millis() > (avi_start_time + avi_length * 1000)) { // end the avi
-
-    Serial.println("End the Avi");
     fb_curr = fb_next;
     fb_next = NULL;
 
     another_save_avi(fb_curr);                 // save final frame of avi
-    digitalWrite(33, frame_cnt % 2);
+    digitalWrite(33, frames % 2);
     esp_camera_fb_return(fb_curr);
     fb_curr = NULL;
 
@@ -1442,14 +1305,13 @@ void loop() {
     digitalWrite(33, HIGH);          // light off
     avi_end_time = millis();
 
-    float fps = frame_cnt / ((avi_end_time - avi_start_time) / 1000) ;
-    Serial.printf("End the avi at %d.  It was %d frames, %d ms at %.1f fps...\n", millis(), frame_cnt, avi_end_time, avi_end_time - avi_start_time, fps);
+    float fps = frames / ((avi_end_time - avi_start_time) / 1000) ;
+    Serial.printf("End the avi at %d.  It was %d frames, %d ms at %.1f fps...\n", millis(), frames, avi_end_time, avi_end_time - avi_start_time, fps);
 
-    frame_cnt = 0;             // start recording again on the next loop
+    frames = 0;             // start recording again on the next loop
 
-  } else if (frame_cnt > 1 && stop != 0) {  // another frame of the avi
+  } else {  // another frame of the avi
 
-    //Serial.println("Another frame");
 
     fb_curr = fb_next;           // we will write a frame, and get the camera preparing a new one
 
@@ -1457,26 +1319,25 @@ void loop() {
 
     another_save_avi(fb_curr);
 
-    digitalWrite(33, frame_cnt % 2);
+    digitalWrite(33, frames % 2);
 
     esp_camera_fb_return(fb_curr);
     fb_curr = NULL;
 
-    if (frame_cnt % 100 == 10 ) {     // print some status every 100 frames
-      if (frame_cnt == 10) {
-        bytes_before_last_100_frames = movi_size;
-        time_before_last_100_frames = millis();
-      } else {
-
-        most_recent_fps = 100.0 / ((millis() - time_before_last_100_frames) / 1000.0) ;
-        most_recent_avg_framesize = (movi_size - bytes_before_last_100_frames) / 100;
-
-        Serial.printf("So far: %04d frames, in %6.1f seconds, for last 100 frames: avg frame size %6.1f kb, %.2f fps ...\n", frame_cnt, 0.001 * (millis() - avi_start_time), 1.0 / 1024  * most_recent_avg_framesize, most_recent_fps);
-        total_delay = 0;
-
+    if (frames % 100 == 0 ) {     // print some status every 100 frames
+      if (frames == 100) {
+        Serial.printf("\n\nframesize %d, quality %d, avi length %d\n\n", framesize, quality, avi_length);
         bytes_before_last_100_frames = movi_size;
         time_before_last_100_frames = millis();
       }
+      most_recent_fps = 100.0 / ((millis() - time_before_last_100_frames) / 1000.0) ;
+      most_recent_avg_framesize = (movi_size - bytes_before_last_100_frames) / 100;
+
+      Serial.printf("So far: %d frames, in %d ms, for last 100 frames: avg frame size %d, %.2f fps ...\n", frames, millis() - avi_start_time, most_recent_avg_framesize, most_recent_fps);
+      total_delay = 0;
+
+      bytes_before_last_100_frames = movi_size;
+      time_before_last_100_frames = millis();
     }
   }
 }
