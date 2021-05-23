@@ -1,78 +1,3 @@
-/*
-
-  ESP32-CAM-Video-Recorder-junior
-
-  This program records an mjpeg avi video to the sd card of an ESP32-CAM.
-
-
-  It is the junior version of   https://github.com/jameszah/ESP32-CAM-Video-Recorder
-  which has 100 other features of wifi, streaming video, http control, telegram updates, pir control,
-  touch control, ftp downloads, .... and other things that make it very big and complex.
-
-  This one is written in simple arduino code without any semaphores, tasks, priorities, RTOS stuff ....
-
-  Just set 4 parameters, compile and download, and it will record on power-on, until sd is full, or power-off.
-  Then pull out the sd and move it to your computer, and you will see all but the last file avi which died during the unplug.
-
-  Compile Time Parameters
-  1.  framesize 10,9,7,6,5 for 10 - UXGA (1600x1200 @ 6 fps), 9 - SXGA (1280x1024 @ 6 fps), 7 - SVGA(800x600 @ 24 fps), 6 - VGA(640x480 @ 24 fps), 5 - CIF(400x296 @ 50 fps)
-  2.  quality - 1 to 63 - 10 is a good start, increase to 20 to get more frames per second - must be higher than jpeg_quality below
-  3.  avi_length - seconds for each avi - it closes files, and starts another file after this time - like 60 or 1800
-  4.  devname - a text name for your camera when the files are on your computer
-
-  Note that framesize and high quality will produce lots of bytes which have to written to the sd.  Those frame rates above are
-  for the OV2640 camera, and your sd card will have to be able to swallow all that data before the next frame.  If the
-  sd card cannot take all that data, then the camera will be idle waiting for the sd.  Lower the framesize (UXGA -> SVGA),
-  and lower the quality (10 -> 15 -> 20, higher number is lower quality) to improve framerate to the camera limits.
-  If you have a fast enough sd card, it will record at the full speed of the camera.
-
-  You can look at the blinking red led on the back of the chip to see the recording rate -- sd chips for video are made to be more predictable.
-
-  The files will have the name such as:
-
-    desklens 10.3 + 120s.avi
-
-    "desklens" is your devname
-    10 - is a number stored in eprom that will increase everytime your device boots
-    3 - is the 3rd file created during the current boot
-    +120s - is an indictation of how long since we started recording on this boot
-          - this is the 3rd file, and started 120 seconds after the boot, so the files must be 60 seconds long
-
-  Small red led on the back blinks with every frame.
-
-
-  by James Zahary Sep 12, 2020
-     jamzah.plc@gmail.com
-
-  https://github.com/jameszah/ESP32-CAM-Video-Recorder-junior
-  https://github.com/jameszah/ESP32-CAM-Video-Recorder
-
-    jameszah/ESP32-CAM-Video-Recorder is licensed under the
-    GNU General Public License v3.0
-
-    jameszah/ESP32-CAM-Video-Recorder-junior is licensed under the
-    GNU General Public License v3.0
-
-  The is Arduino code, with standard setup for ESP32-CAM
-    - Board ESP32 Wrover Module
-    - Partition Scheme Huge APP (3MB No OTA)
-
-  Compiled with Arduino 1.8.12, which used these libraries:
-
-  Using library SD_MMC at version 1.0 in folder: C:\Users\James\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.4\libraries\SD_MMC
-  Using library FS at version 1.0 in folder: C:\Users\James\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.4\libraries\FS
-  Using library EEPROM at version 1.0.3 in folder: C:\Users\James\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.4\libraries\EEPROM
-  Using library WiFi at version 1.0 in folder: C:\Users\James\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.4\libraries\WiFi
-  Using library ESPmDNS at version 1.0 in folder: C:\Users\James\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.4\libraries\ESPmDNS
-  Using library HTTPClient at version 1.2 in folder: C:\Users\James\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.4\libraries\HTTPClient
-  Using library WiFiClientSecure at version 1.0 in folder: C:\Users\James\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.4\libraries\WiFiClientSecure
-
-*/
-
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// user edits here:
-
 static const char vernum[] = "v07";
 static const char devname[] = "vase";         // name of your camera for mDNS, Router, and filenames
 
@@ -81,12 +6,12 @@ const char* ssid = "vase";
 const char* password = "12345678";
 
 // https://sites.google.com/a/usapiens.com/opnode/time-zones  -- find your timezone here
-#define TIMEZONE "EET-2EEST-3,M3.5.0/03:00:00,M10.5.0/04:00:00"             // your timezone  -  this is GMT
+#define TIMEZONE "GMT0BST,M3.5.0/01,M10.5.0/02"             // your timezone  -  this is GMT
 
 // svga, quality 10, 5 minute video then restart, .. and realtime fast as the camera and disk will allow
-int  framesize = 7;                //  10 UXGA, 9 SXGA, 7 SVGA, 6 VGA, 5 CIF
-int  quality = 10;                 //  quality on the 1..63 scale  - lower is better quality and bigger files - must be higher than the jpeg_quality in camera_config
-int avi_length = 10;               // how long a movie in seconds -- 300 = 5 minutes
+int  framesize = 6;                //  10 UXGA, 9 SXGA, 7 SVGA, 6 VGA, 5 CIF
+int  quality = 11;                 //  quality on the 1..63 scale  - lower is better quality and bigger files - must be higher than the jpeg_quality in camera_config
+int avi_length = 60;               // how long a movie in seconds -- 300 = 5 minutes
 
 int MagicNumber = 11;                // change this number to reset the eprom in your esp32 for file numbers
 
