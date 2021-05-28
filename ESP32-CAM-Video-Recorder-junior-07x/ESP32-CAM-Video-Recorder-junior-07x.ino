@@ -11,7 +11,7 @@ const char* password = "12345678";
 // svga, quality 10, 5 minute video then restart, .. and realtime fast as the camera and disk will allow
 int  framesize = 6;                //  10 UXGA, 9 SXGA, 7 SVGA, 6 VGA, 5 CIF
 int  quality = 11;                 //  quality on the 1..63 scale  - lower is better quality and bigger files - must be higher than the jpeg_quality in camera_config
-int avi_length = 60;               // how long a movie in seconds -- 300 = 5 minutes
+int avi_length = 30;               // how long a movie in seconds -- 300 = 5 minutes
 
 int MagicNumber = 11;                // change this number to reset the eprom in your esp32 for file numbers
 
